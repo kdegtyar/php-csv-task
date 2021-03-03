@@ -6,6 +6,8 @@ Each user is uniquely identified by email address.
 
 ## Requirements
 * PHP version 7.2 or newer
+* PHP Data Objects (PDO) library must be present in PHP
+* PostgreSQL module for PHP (In Ubuntu can be installed using: _**sudo apt-get install php7.2-pgsql**_)
 * PostgreSQL Database Server version 9.5 or newer
 
 ## Command Line Arguments
