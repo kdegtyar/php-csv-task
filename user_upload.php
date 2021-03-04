@@ -18,6 +18,22 @@ $term_colors = array(
   'RESET'=> "\x1B[0m"
 );
 
+
+/*
+ * Helper function that detects if terminal is TTY and sets up the colors
+ * or disables them.
+ */
+function setup_terminal()
+{
+  global $term_colors;
+  
+  if (stream_isatty(STDOUT) && stream_isatty(STDERR))
+    return; // colors are enabled, do not suppress them
+  
+  foreach($term_colors as $k => $v)
+    $term_colors[$k] = ""; // suppress colors by resetting their values
+}
+
 /*
  * Helper function to print error messages
  * 
@@ -535,6 +551,7 @@ class CsvUpload
   
 }
 
+setup_terminal();
 
 $csv_uploader = new CsvUpload();
 return $csv_uploader->process();
