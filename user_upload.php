@@ -7,6 +7,16 @@
  * March 2021
  */
 
+$term_colors = array(
+  'RED'  => "\x1B[31m",
+  'GRN'  => "\x1B[32m",
+  'YEL'  => "\x1B[33m",
+  'BLU'  => "\x1B[34m",
+  'MAG'  => "\x1B[35m",
+  'CYN'  => "\x1B[36m",
+  'WHT'  => "\x1B[37m",
+  'RESET'=> "\x1B[0m"
+);
 
 /*
  * Helper function to print error messages
@@ -18,7 +28,9 @@
  */
 function errmsg($msg, $stderr = FALSE)
 {
-  $out = "ERROR: ".$msg."\n";
+  global $term_colors;
+  
+  $out = $term_colors['RED']."ERROR: ".$term_colors['RESET'].$msg."\n";
   if ($stderr)
     fwrite(STDERR, $out);
   else
@@ -33,10 +45,43 @@ $show_status = FALSE;
 
 function statmsg($msg, $stdout = FALSE)
 {
-  if ($GLOBALS["show_status"] == FALSE)
+  global $show_status, $term_colors;
+  if ($show_status == FALSE)
     return;
-    
-  $out = "STATUS: ".$msg."\n";
+  
+  $out = "";
+  
+  if (is_array($msg))
+  {
+    foreach($msg as $k => $v)
+      $out .= $term_colors['CYN']."[ $k : ".$term_colors['RESET'].$v.
+              $term_colors['CYN']." ] ".$term_colors['RESET'];
+  }
+  else
+    $out = $msg;
+  
+  $out = $term_colors['YEL']."STATUS: ".$term_colors['RESET'].$out."\n";
+  if ($stdout)
+    fwrite(STDOUT, $out);
+  else
+    echo $out;
+}
+
+
+/*
+ * Helper function to print info messages
+ * 
+ * Parameters:
+ *   msg - string, message to be printed
+ *   stdout - bool, print into STDERR instead of STDOUT
+ * 
+ */
+function infomsg($msg, $stdout = FALSE)
+{
+  global $term_colors;
+  
+  $out = $term_colors['GRN']."INFO: ".$term_colors['RESET'].$msg."\n";
+  
   if ($stdout)
     fwrite(STDOUT, $out);
   else
@@ -129,7 +174,8 @@ class CsvFile
    * 
    * Returns:
    *   validated data array for inserting into the database on success
-   *   FALSE on error
+   *   empty array() if processing error happened
+   *   FALSE when end of file is reached
    */
   function get_csv_row()
   {
@@ -140,19 +186,23 @@ class CsvFile
     // Read next line in CSV file
     if (($raw_csv = fgets($this->file)) !== FALSE)
     {
-      // All leading and trailing 
+      // All leading and trailing spaces removed
       $raw_csv = trim($raw_csv);
       
       $this->line_num++;
+      if (strlen($raw_csv) == 0)
+        return array();  // Just an empty line, no error is needed
+      
       if (($csv_array = str_getcsv($raw_csv)) == FALSE)
       {
         errmsg("Wrong CSV line format: $raw_csv");
-        return FALSE;
+        return array();
       }
       if (($data_validated = $this->csv_row_validate($csv_array)) == FALSE)
       {
-        errmsg("$this->file_name : line $this->line_num has invalid data: [$raw_csv]");
-        return FALSE;
+        errmsg("$this->file_name : line $this->line_num has invalid data: ".
+               "[$raw_csv]");
+        return array();
       }
       
       return $data_validated;
@@ -173,6 +223,8 @@ class CsvUpload
   
   public $conn; // PDO Connection handle, which will be automatically destroyed
                 // on error or on normal exit. So, it is quite safe.
+                
+  public $stmt; // Prepared statement handle for data inserts
                 
   public $csv_file; // CsvFile object
   
@@ -285,6 +337,9 @@ class CsvUpload
     {
       // PDO is working with many databases, better than pg_connect()
       $this->conn = new PDO($connect_str, $user, $pwd);
+      
+      // Set the error mode to throw exceptions in addition to error codes
+      $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     }
     catch(PDOException $ex)
     {
@@ -292,24 +347,9 @@ class CsvUpload
       return FALSE;
     }
 
-    statmsg("Connected");
+    statmsg("Connected to ".(isset($host) ? $host : "default host"));
     //var_dump($this->opts);
     return TRUE;
-  }
-  
-  
-  /* 
-   * Print the database error information into STDOUT
-   * 
-   * Parameters:
-   *  stderr - causes to print error into STDERR
-   */
-  function print_db_error($stderr = FALSE)
-  {
-    $info = $this->conn->errorInfo();
-    $outstr = "Error creating 'users' table\n".
-              "[SQLSTATE: $info[0]][Error Code:$info[1]]$info[2]\n";
-    errmsg($outstr, $stderr);
   }
   
   
@@ -325,21 +365,83 @@ class CsvUpload
     if (!$this->connect())
       return 1;
     
-    if ($this->conn->query("CREATE TABLE users(id SERIAL PRIMARY KEY,".
-                         "name VARCHAR(255), surname VARCHAR(255),".
-                         "email VARCHAR(255) UNIQUE)") == FALSE)
+    try
     {
-      $this->print_db_error();
-      statmsg("No changes are made in the database");
+      $this->conn->query("CREATE TABLE users(id SERIAL PRIMARY KEY,".
+                         "name VARCHAR(255), surname VARCHAR(255),".
+                         "email VARCHAR(255) UNIQUE)");
+    }
+    catch (PDOException $ex)
+    {
+      
+      errmsg($ex->getMessage());
+      errmsg("No changes are made in the database");
       return 1;
     }
     
-    statmsg("Table 'users' is successfully created");
+    infomsg("Table 'users' is successfully created");
     
     return 0;
   }
   
   
+  /*
+   * Inserting one row of data into 'users' table
+   * 
+   * Parameters:
+   *   data - array, data to insert
+   * 
+   * Returns:
+   *   FALSE - if unrecoverable error happens
+   *   0 - if recoverable error happens
+   *   N - integer, number of inserted rows
+   */ 
+  function insert_db_data($data)
+  {
+    if (!isset($this->stmt))
+    {
+      // Prepare a statement only once
+      $sql = "INSERT INTO users (name, surname, email) ".
+             "VALUES (:name, :surname, :email)";
+      try
+      {
+        $this->stmt = $this->conn->prepare($sql);
+      }
+      catch(PDOException $ex)
+      {
+        errmsg($ex->getMessage());
+        return FALSE;
+      }
+    }
+    
+    if (!isset($this->stmt))
+    {
+      errmsg("SQL is not prepared");
+      return FALSE;
+    }
+    
+    try
+    {
+      $this->stmt->execute($data);
+    }
+    catch(PDOException $ex)
+    {
+      errmsg($ex->getMessage());
+      /* Probably the unique data was duplicating, 
+         we can ignore this error and try again later */
+      return 0;
+    }
+    
+    return $this->stmt->rowCount();
+  }
+  
+  /*
+   * Import CSV file line by line.
+   * 
+   * Parameters:
+   *   fname - string, the file name
+   *   dry_run - bool, the dry_run directive
+   */
   function import_csv($fname, $dry_run = FALSE)
   {
     if (!$this->connect())
@@ -354,14 +456,32 @@ class CsvUpload
       errmsg($ex->getMessage());
       return 1;
     }
+    
     statmsg("Opened $fname for reading");
     
+    $processed_count = 0;
+    
+    // Reading CSV line by line till the end
     while(($data = $this->csv_file->get_csv_row()) !== FALSE)
     {
-      statmsg("[name: ".$data['name']."] [surname: ".$data['surname']."] ".
-              "[email: ".$data['email']."]");
+      if(count($data) == 0)
+        continue; // Current line could not be processing, skip to the next
+        
+      statmsg($data);
+              
+      if ($dry_run == FALSE)
+      {
+        // Write data into the table only if --dry_run is not specified
+        if (($res = $this->insert_db_data($data)) === FALSE)
+          return 1; // Something bad happened, cannot continue
+          
+        if ($res)
+          $processed_count++;
+      }
+      else
+        $processed_count++; // For dry_run just increment
     }
-    statmsg("Processed ".$this->csv_file->line_num." lines");
+    infomsg("Processed $processed_count out of ".$this->csv_file->line_num." lines");
     return 0;
   }
   
