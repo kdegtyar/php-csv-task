@@ -8,6 +8,151 @@
  */
 
 
+/*
+ * Helper function to print error messages
+ * 
+ * Parameters:
+ *   msg - string, message to be printed
+ *   stderr - bool, print into STDERR instead of STDOUT
+ * 
+ */
+function errmsg($msg, $stderr = FALSE)
+{
+  if ($stderr)
+    fwrite(STDERR, $msg."\n");
+  else
+    fwrite(STDOUT, $msg."\n");
+}
+
+/*
+ * Variable to show the status messages for debugging.
+ * Set to FALSE to suppress printing status
+ */
+$show_status = TRUE;
+
+function statmsg($msg, $stdout = FALSE)
+{
+  if ($GLOBALS["show_status"] == FALSE)
+    return;
+    
+  if ($stdout)
+    fwrite(STDOUT, "STATUS: ".$msg."\n");
+  else
+    echo "STATUS: ".$msg."\n";
+}
+
+/*
+ * Class that loads and validates the CSV file from the filesystem
+ */
+class CsvFile
+{
+  
+  public $file;      // File handle
+  public $file_name; // File name
+  public $line_num;  // Current line number in CSV 
+  
+  /*
+   * Constructor for CsvFile class
+   * 
+   * Parameters:
+   *  fname - the CSV file name to be processed. Can be the absolute or
+   *          relative path to the file.
+   * 
+   * Throws error if the file could not be opened.
+   * 
+   */
+  function __construct($fname)
+  {
+    $this->file_name = $fname;
+    if (($this->file = @fopen($fname, "r")) == FALSE)
+      throw new Exception("File $fname could not be opened");
+    $this->line_num = 0;
+  }
+  
+  
+  /*
+   * File handle is not implicitly closed, so we need to do it in
+   * the destructor.
+   */
+  function __destruct()
+  {
+    fclose($this->file);
+    statmsg("Closed ".$this->file_name);
+  }
+  
+  
+  /* 
+   * Performs the validation:
+   *  - name and surname should be capitalized e.g. from "john" to "John"
+   *  - emails should be set to lowercase
+   *  - emails should be valid addresses
+   * 
+   * Parameters:
+   *  data - array with numerical indexes where
+   *     0 - name 
+   *     1 - surname
+   *     2 - email
+   * 
+   * Returns:
+   *  validated row where indexes are strings on success
+   *  FALSE on failure
+   */ 
+  function csv_row_validate($data)
+  {
+    $row['name'] = ucfirst(strtolower($data[0]));
+    $row['surname'] = ucfirst(strtolower($data[1]));
+    
+    $email = strtolower(trim($data[2]));
+    $email = filter_var($email, FILTER_VALIDATE_EMAIL);
+    
+    if ($email !== FALSE)
+      $row['email'] = $email;
+    else
+      return FALSE;
+      
+    return $row;
+  }
+  
+
+  /*
+   * Read one row from CSV file. The header is skipped because it does
+   * not contain data.
+   * 
+   * Returns:
+   *   validated data array for inserting into the database on success
+   *   FALSE on error
+   */
+  function get_csv_row()
+  {
+    // Read the header and ignore it
+    if ($this->line_num == 0 && fgets($this->file) == FALSE)
+      return FALSE;
+
+    // Read next CSV row
+    if (($raw_csv = fgets($this->file)) !== FALSE)
+    {
+      $raw_csv = trim($raw_csv);
+      statmsg("\n".$raw_csv);
+      $this->line_num++;
+      if (($csv_array = str_getcsv($raw_csv)) == FALSE)
+      {
+        errmsg("Wrong CSV line format: $raw_csv");
+        return FALSE;
+      }
+      if (($data_validated = $this->csv_row_validate($csv_array)) == FALSE)
+      {
+        errmsg("Data validation error: $raw_csv");
+        return FALSE;
+      }
+      
+      return $data_validated;
+    }
+    
+    return FALSE;
+  }
+}
+
+
 /* 
  * Class that provides functionality for uploading CSV into 
  * PostgreSQL database
@@ -18,6 +163,8 @@ class CsvUpload
   
   public $conn; // PDO Connection handle, which will be automatically destroyed
                 // on error or on normal exit. So, it is quite safe.
+                
+  public $csv_file; // CsvFile object
   
   function __construct()
   {
@@ -130,12 +277,11 @@ class CsvUpload
     }
     catch(PDOException $ex)
     {
-      $outstr = "Connection error: ".$ex->getMessage()."\n";
-      fwrite(STDOUT, $outstr);
+      errmsg("Connection error: ".$ex->getMessage());
       return FALSE;
     }
 
-    echo "Connected\n";
+    statmsg("Connected");
     //var_dump($this->opts);
     return TRUE;
   }
@@ -152,10 +298,7 @@ class CsvUpload
     $info = $this->conn->errorInfo();
     $outstr = "Error creating 'users' table\n".
               "[SQLSTATE: $info[0]][Error Code:$info[1]]$info[2]\n";
-    if ($stderr)
-      fwrite(STDERR, $outstr);
-    else
-      fwrite(STDOUT, $outstr);
+    errmsg($outstr, $stderr);
   }
   
   
@@ -172,16 +315,38 @@ class CsvUpload
       return 1;
     
     if ($this->conn->query("CREATE TABLE users(id SERIAL PRIMARY KEY,".
-                         "name VARCHAR(64), surname VARCHAR(64),".
-                         "email VARCHAR(64) UNIQUE)") == FALSE)
+                         "name VARCHAR(255), surname VARCHAR(255),".
+                         "email VARCHAR(255) UNIQUE)") == FALSE)
     {
       $this->print_db_error();
-      fwrite(STDOUT, "No changes are made in the database\n");
+      statmsg("No changes are made in the database");
       return 1;
     }
     
-    echo "Table 'users' is successfully created\n";
+    statmsg("Table 'users' is successfully created");
     
+    return 0;
+  }
+  
+  
+  function import_csv($fname, $dry_run = FALSE)
+  {
+    try
+    {
+      $this->csv_file = new CsvFile($fname);
+    }
+    catch(Exception $ex)
+    {
+      errmsg($ex->getMessage());
+      return 1;
+    }
+    statmsg("Opened $fname for reading");
+    
+    while(($data = $this->csv_file->get_csv_row()) !== FALSE)
+    {
+      statmsg("[name: ".$data['name']."] [surname: ".$data['surname']."] ".
+              "[email: ".$data['email']."]");
+    }
     return 0;
   }
   
@@ -213,6 +378,16 @@ class CsvUpload
       // Create users table and do nothing else
       return $this->create_table();
     }
+    else if ($fname = $this->getoption("file"))
+    {
+      $dry_run = $this->getoption("dry_run");
+      return $this->import_csv($fname, $dry_run);
+    }
+    else if ($this->getoption("dry_run"))
+    {
+      echo "The option --dry_run requires --file to be specified\n";
+      return 1;
+    }
     
     echo "No action is taken. ".
          "Please run with --help to check the command line options.\n";
@@ -220,9 +395,10 @@ class CsvUpload
   
 }
 
+
+echo "--------".filter_var("wrong?@gmail.com", FILTER_VALIDATE_EMAIL);
+
 $csv_uploader = new CsvUpload();
 return $csv_uploader->process();
 
-
-//var_dump($opts);
 ?>
