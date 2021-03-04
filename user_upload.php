@@ -18,27 +18,29 @@
  */
 function errmsg($msg, $stderr = FALSE)
 {
+  $out = "ERROR: ".$msg."\n";
   if ($stderr)
-    fwrite(STDERR, $msg."\n");
+    fwrite(STDERR, $out);
   else
-    fwrite(STDOUT, $msg."\n");
+    fwrite(STDOUT, $out);
 }
 
 /*
  * Variable to show the status messages for debugging.
  * Set to FALSE to suppress printing status
  */
-$show_status = TRUE;
+$show_status = FALSE;
 
 function statmsg($msg, $stdout = FALSE)
 {
   if ($GLOBALS["show_status"] == FALSE)
     return;
     
+  $out = "STATUS: ".$msg."\n";
   if ($stdout)
-    fwrite(STDOUT, "STATUS: ".$msg."\n");
+    fwrite(STDOUT, $out);
   else
-    echo "STATUS: ".$msg."\n";
+    echo $out;
 }
 
 /*
@@ -99,16 +101,21 @@ class CsvFile
    */ 
   function csv_row_validate($data)
   {
-    $row['name'] = ucfirst(strtolower($data[0]));
-    $row['surname'] = ucfirst(strtolower($data[1]));
+    // Make sure the array size is not too small
+    if (count($data) < 3)
+      return FALSE;
+      
+    $row['name'] = ucfirst(strtolower(trim($data[0])));
+    $row['surname'] = ucfirst(strtolower(trim($data[1])));
     
-    $email = strtolower(trim($data[2]));
-    $email = filter_var($email, FILTER_VALIDATE_EMAIL);
-    
-    if ($email !== FALSE)
+    if (($email = filter_var(strtolower(trim($data[2])), 
+                             FILTER_VALIDATE_EMAIL)) !== FALSE)
       $row['email'] = $email;
     else
+    {
+      errmsg("Email validation failed: ".$data[2]);
       return FALSE;
+    }
       
     return $row;
   }
@@ -117,6 +124,8 @@ class CsvFile
   /*
    * Read one row from CSV file. The header is skipped because it does
    * not contain data.
+   * The CSV file can be very large and we do not want to read the entire
+   * file into the memory. Therefore, reading it one line at a time.
    * 
    * Returns:
    *   validated data array for inserting into the database on success
@@ -128,11 +137,12 @@ class CsvFile
     if ($this->line_num == 0 && fgets($this->file) == FALSE)
       return FALSE;
 
-    // Read next CSV row
+    // Read next line in CSV file
     if (($raw_csv = fgets($this->file)) !== FALSE)
     {
+      // All leading and trailing 
       $raw_csv = trim($raw_csv);
-      statmsg("\n".$raw_csv);
+      
       $this->line_num++;
       if (($csv_array = str_getcsv($raw_csv)) == FALSE)
       {
@@ -141,7 +151,7 @@ class CsvFile
       }
       if (($data_validated = $this->csv_row_validate($csv_array)) == FALSE)
       {
-        errmsg("Data validation error: $raw_csv");
+        errmsg("$this->file_name : line $this->line_num has invalid data: [$raw_csv]");
         return FALSE;
       }
       
@@ -217,7 +227,8 @@ class CsvUpload
          " --dry_run      - this will be used with the --file directive in case\n".
          "                  we want to run the script but not insert into\n".
          "                  the DB. All other functions will be executed,\n".
-         "                  but the database won\'t be altered\n".
+         "                  but the database won\'t be altered. The status\n".
+         "                  and validated data will be printed.\n".
          " -u <username>  - user name to connect to PostgreSQL\n".
          " -p <password>  - password to connect to PostgreSQL\n".
          " -h <host>      - host address of PostgreSQL server\n\n".
@@ -331,6 +342,9 @@ class CsvUpload
   
   function import_csv($fname, $dry_run = FALSE)
   {
+    if (!$this->connect())
+      return 1;
+    
     try
     {
       $this->csv_file = new CsvFile($fname);
@@ -347,6 +361,7 @@ class CsvUpload
       statmsg("[name: ".$data['name']."] [surname: ".$data['surname']."] ".
               "[email: ".$data['email']."]");
     }
+    statmsg("Processed ".$this->csv_file->line_num." lines");
     return 0;
   }
   
@@ -380,7 +395,12 @@ class CsvUpload
     }
     else if ($fname = $this->getoption("file"))
     {
-      $dry_run = $this->getoption("dry_run");
+      if (($dry_run = $this->getoption("dry_run")) !== FALSE)
+      {
+        // Enable STATUS messages
+        $GLOBALS["show_status"] = TRUE;
+      }
+      
       return $this->import_csv($fname, $dry_run);
     }
     else if ($this->getoption("dry_run"))
@@ -395,8 +415,6 @@ class CsvUpload
   
 }
 
-
-echo "--------".filter_var("wrong?@gmail.com", FILTER_VALIDATE_EMAIL);
 
 $csv_uploader = new CsvUpload();
 return $csv_uploader->process();

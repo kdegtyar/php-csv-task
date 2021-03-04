@@ -14,7 +14,7 @@ Each user is uniquely identified by email address.
 
 * **--file [csv file name]** – the name of the CSV to be parsed
 * **--create_table** – this will cause the PostgreSQL users table to be built (and no further action will be taken)
-* **--dry_run** – this will be used with the **--file** directive in case we want to run the script but not insert into the DB. All other functions will be executed, but the database won't be altered
+* **--dry_run** – this will be used with the **--file** directive in case we want to run the script but not insert into the DB. All other functions will be executed, but the database won't be altered. The status information and validated data will be printed.
 * **-u** – PostgreSQL username
 * **-p** – PostgreSQL password
 * **-h** – PostgreSQL host
