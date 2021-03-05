@@ -294,7 +294,7 @@ class CsvUpload
    */
   function display_help($details)
   {
-    echo "CSV to PostgreSQL user data uploader\n";
+    echo "CSV to PostgreSQL user data uploader version 1.0.0\n";
     echo "Usage information:\n".
          "  php user_upload.php [--file <csv file name> [--dry_run [--force_connect]]]\n".
          "                      [--create_table]\n".
