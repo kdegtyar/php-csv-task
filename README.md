@@ -14,17 +14,20 @@ Each user is uniquely identified by email address.
 
 * **--file [csv file name]** – the name of the CSV to be parsed
 * **--create_table** – this will cause the PostgreSQL users table to be built (and no further action will be taken)
-* **--dry_run** – this will be used with the **--file** directive in case we want to run the script but not insert into the DB. All other functions will be executed, but the database won't be altered. The status information and validated data will be printed.
+* **--dry_run** – this will be used with the **--file** directive in case we want to run the script but not insert into the DB. All other functions will be executed, but no connection database is attempted. The status information and validated data will be printed.
+* **--force_connect** - force connecting to PosgreSQL with --dry_run to check the connection. No changes are made in the database.
 * **-u** – PostgreSQL username
 * **-p** – PostgreSQL password
 * **-h** – PostgreSQL host
 * **--help** – output the above list of directives with details
 
-## Structure of _CSV_ file columns
+## Structure of _CSV_ file
 
 * **name** - 1st column in CSV file containing the **name** of the user
 * **surname** - 2nd column in CSV file containing the user's **surname**
 * **email** - 3rd column in CSV file containing the user's **email**
+
+First row inside the file is considered a header and therefore is skipped
 
 ## Structure of _users_ table in PostgreSQL
 

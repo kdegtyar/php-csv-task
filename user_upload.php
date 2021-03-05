@@ -9,9 +9,9 @@
 
 /*
  * TODO:
- *    Incomplete CSV with the number of columns less than 3 or empty values
- *    Checking if 'users' table already exists and has columns
- *    Data warning when more than 3 columns in CSV
+ * [x] Incomplete CSV with the number of columns less than 3 or empty values
+ * [ ] Better checking if an existing 'users' table is compatible
+ * [x]  Data warning when more than 3 columns in CSV
  */
 
 
@@ -165,7 +165,7 @@ class CsvFile
    *     0 - name 
    *     1 - surname
    *     2 - email
-   * 
+   *     3 - extra (if exists) just for reporting
    * Returns:
    *  validated row where indexes are strings on success
    *  FALSE on failure
@@ -179,6 +179,12 @@ class CsvFile
     $row['name'] = ucfirst(strtolower(trim($data[0])));
     $row['surname'] = ucfirst(strtolower(trim($data[1])));
     
+    if (strlen($row['name']) == 0 || strlen($row['name']) == 0)
+    {
+      errmsg("name or surname cannot be empty");
+      return FALSE;
+    }
+    
     if (($email = filter_var(strtolower(trim($data[2])), 
                              FILTER_VALIDATE_EMAIL)) !== FALSE)
       $row['email'] = $email;
@@ -187,6 +193,10 @@ class CsvFile
       errmsg("Email validation failed: ".$data[2]);
       return FALSE;
     }
+    
+    // Check if more than 3 columns exist
+    if (count($data) > 3)
+      $row['extra'] = $data[3];
       
     return $row;
   }
@@ -266,6 +276,7 @@ class CsvUpload
                    "file:",          // CSV file name (value required)
                    "create_table",   // create table  (no value)
                    "dry_run",        // dry run       (no value)
+                   "force_connect",  // force connect (no value)
                    "help"            // display help  (no value)
                  );
 
@@ -285,9 +296,8 @@ class CsvUpload
   {
     echo "CSV to PostgreSQL user data uploader\n";
     echo "Usage information:\n".
-         "  php user_upload.php [--file <csv file name>]\n".
+         "  php user_upload.php [--file <csv file name> [--dry_run [--force_connect]]]\n".
          "                      [--create_table]\n".
-         "                      [--dry_run]\n".
          "                      [-u <username>]\n".
          "                      [-p <password>]\n".
          "                      [-h <host>]\n".
@@ -300,18 +310,21 @@ class CsvUpload
     }
     
     echo " --file <csv file name> – the name of the CSV to be parsed\n".
-         " --create_table - this will cause the PostgreSQL users table to be \n".
-         "                  built (and no further action will be taken).\n".
-         "                  If users table already exists no action will be\n".
-         "                  taken\n".
-         " --dry_run      - this will be used with the --file directive in case\n".
-         "                  we want to run the script but not insert into\n".
-         "                  the DB. All other functions will be executed,\n".
-         "                  but the database won't be altered. The status\n".
-         "                  and validated data will be printed.\n".
-         " -u <username>  - user name to connect to PostgreSQL\n".
-         " -p <password>  - password to connect to PostgreSQL\n".
-         " -h <host>      - host address of PostgreSQL server\n\n".
+         " --create_table -  this will cause the PostgreSQL users table to be \n".
+         "                   built (and no further action will be taken).\n".
+         "                   If users table already exists no action will be\n".
+         "                   taken\n".
+         " --dry_run       - this will be used with the --file directive in case\n".
+         "                   we want to run the script but not insert into\n".
+         "                   the DB. All other functions will be executed,\n".
+         "                   but the database won't be altered. The status\n".
+         "                   and validated data will be printed.\n".
+         " --force_connect - force connecting to PosgreSQL with --dry_run\n".
+         "                   to check the connection. No changes are made\n".
+         "                   in the database\n".
+         " -u <username>  -  user name to connect to PostgreSQL\n".
+         " -p <password>  -  password to connect to PostgreSQL\n".
+         " -h <host>      -  host address of PostgreSQL server\n\n".
          " --help – output the above list of directives with details\n\n";
   }
   
@@ -535,16 +548,20 @@ class CsvUpload
    *   fname - string, the file name
    *   dry_run - bool, the dry_run directive
    */
-  function import_csv($fname, $dry_run = FALSE)
+  function import_csv($fname, $dry_run = FALSE, $force_connect = FALSE)
   {
-    if (!$this->connect())
-      return 1;
-    
-    if ($this->check_users_table() == FALSE)
+    if ($dry_run == FALSE || $force_connect == TRUE)
     {
-      errmsg("The table 'users' does not exist or is incompatible with ".
-             "the required format. Use --create_table directive to create ".
-             "the 'users' table");
+      if (!$this->connect())
+        return 1;
+      
+      if ($this->check_users_table() == FALSE)
+      {
+        errmsg("The table 'users' does not exist or is incompatible with ".
+               "the required format. Use --create_table directive to create ".
+               "the 'users' table");
+        return 1;
+      }
     }
     
     try
@@ -568,6 +585,8 @@ class CsvUpload
         continue; // Current line could not be processing, skip to the next
         
       statmsg($data);
+      if (isset($data['extra']))
+        infomsg("Extra column is found in CSV data. It will be ignored.");
               
       if ($dry_run == FALSE)
       {
@@ -623,7 +642,8 @@ class CsvUpload
         $GLOBALS["show_status"] = TRUE;
       }
       
-      return $this->import_csv($fname, $dry_run);
+      return $this->import_csv($fname, $dry_run,
+                               $this->getoption("force_connect"));
     }
     else if ($this->getoption("dry_run"))
     {
