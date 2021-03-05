@@ -11,7 +11,8 @@
  * TODO:
  * [x] Incomplete CSV with the number of columns less than 3 or empty values
  * [ ] Better checking if an existing 'users' table is compatible
- * [x]  Data warning when more than 3 columns in CSV
+ * [x] Data warning when more than 3 columns in CSV
+ * [ ] Detecting the structure for the table using CSV header
  */
 
 
@@ -42,6 +43,7 @@ function setup_terminal()
     $term_colors[$k] = ""; // suppress colors by resetting their values
 }
 
+
 /*
  * Helper function to print error messages
  * 
@@ -61,12 +63,19 @@ function errmsg($msg, $stderr = FALSE)
     fwrite(STDOUT, $out);
 }
 
+
 /*
  * Variable to show the status messages for debugging.
  * Set to FALSE to suppress printing status
  */
 $show_status = FALSE;
 
+/*
+ * Helper function to print status messages
+ * Parameters:
+ *   msg - string or array, info to be printed
+ *   stdout - bool, print into STDOUT insteado of echo
+ */
 function statmsg($msg, $stdout = FALSE)
 {
   global $show_status, $term_colors;
@@ -90,7 +99,7 @@ function statmsg($msg, $stdout = FALSE)
   if ($stdout)
     fwrite(STDOUT, $out);
   else
-    echo $out;
+    echo $out; // Technically echo is different from STDOUT
 }
 
 
@@ -99,7 +108,7 @@ function statmsg($msg, $stdout = FALSE)
  * 
  * Parameters:
  *   msg - string, message to be printed
- *   stdout - bool, print into STDERR instead of STDOUT
+ *   stdout - bool, print into STDOUT instead of echo
  * 
  */
 function infomsg($msg, $stdout = FALSE)
@@ -113,6 +122,7 @@ function infomsg($msg, $stdout = FALSE)
   else
     echo $out;
 }
+
 
 /*
  * Class that loads and validates the CSV file from the filesystem
@@ -246,7 +256,7 @@ class CsvFile
     
     return FALSE;
   }
-}
+} // class CsvFile
 
 
 /* 
@@ -264,6 +274,10 @@ class CsvUpload
                 
   public $csv_file; // CsvFile object
   
+  /*
+   * Constructor.
+   * Processes the command line directives
+   */
   function __construct()
   {
     // Describe the short options format for getopt()
@@ -294,7 +308,7 @@ class CsvUpload
    */
   function display_help($details)
   {
-    echo "CSV to PostgreSQL user data uploader version 1.0.0\n";
+    echo "CSV to PostgreSQL user data uploader\n";
     echo "Usage information:\n".
          "  php user_upload.php [--file <csv file name> [--dry_run [--force_connect]]]\n".
          "                      [--create_table]\n".
@@ -353,6 +367,7 @@ class CsvUpload
       
     return FALSE;
   }
+
 
   /*
    * Connecting to PostgreSQL database.
@@ -541,6 +556,7 @@ class CsvUpload
     return $this->stmt->rowCount();
   }
   
+
   /*
    * Import CSV file line by line.
    * 
@@ -655,7 +671,7 @@ class CsvUpload
          "Please run with --help to check the command line options.\n";
   }
   
-}
+} // CsvUpload
 
 setup_terminal();
 
