@@ -543,6 +543,9 @@ class CsvUpload
     
     try
     {
+      if (isset($data['extra']))
+        unset($data['extra']); // Remove the extra column before doing insert
+      
       $this->stmt->execute($data);
     }
     catch(PDOException $ex)
